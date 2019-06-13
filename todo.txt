@@ -1,0 +1,56 @@
+**
+actor should honor graceful shutdown, by using:
+https://github.com/eapache/go-resiliency
+https://github.com/eapache/go-resiliency/blob/master/deadline/deadline.go#L30
+duh~ of course at application level we can't forcefully terminate the running
+goroutine~
+
+
+1. trace enabled
+
+// ------------------------------------------------------------------
+Tada moment:
+1. gRPC between daemon, actors amount processes
+
+--- Design Principle ---
+1.
+Clear separation of concerns
+
+2.
+Garbage free in steady state running
+
+3.
+Lock-free, wait-free, and copy-free in data structures in the message path
+
+4.
+Repsect the Single Writer Principle
+
+5.
+Major data structures are not shared
+
+6.
+Don't burden the main path with exceptional cases
+
+7.
+Non-blocking in the message path
+
+
+---------------------------------
+Message / payload should have Actors[address] in metadata, like route
+modifying MAC address for next hop. Including Version information
+    (Match to REST API version/gRPC version)
+
+Message / payload should have 'priority' tag (like tcp's urgent pointer)
+Message / payload should have UUID
+Message / payload should have timestamp
+Message / payload should have version (message version)
+Message / payload can have a actor path field which records the
+    actors that has processed this message. (only record the previous
+    actor, since actor has and trace info help debugging the path.)
+
+Payload version:
+config versioning https://github.com/hashicorp/go-version
+
+---------------------------------
+Unit test cmd:
+$ go test -cover -race -covermode=atomic -coverprofile=test_result.out -v -actor 1000 -msg 1000

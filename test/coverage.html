@@ -1,0 +1,636 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/vsdmars/actor/defaultActors.go (0.0%)</option>
+				
+				<option value="file1">github.com/vsdmars/actor/localActor.go (81.2%)</option>
+				
+				<option value="file2">github.com/vsdmars/actor/logger.go (0.0%)</option>
+				
+				<option value="file3">github.com/vsdmars/actor/runtime.go (93.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package actor
+
+import (
+        l "github.com/vsdmars/actor/internal/logger"
+
+        "go.uber.org/zap"
+)
+
+// LogErrorActor used for logging errors
+func LogErrorActor(actor Actor) <span class="cov0" title="0">{
+        for </span><span class="cov0" title="0">{
+                select </span>{
+                case &lt;-actor.Done():<span class="cov0" title="0">
+                        return</span>
+                case err := &lt;-actor.Receive():<span class="cov0" title="0">
+                        e := err.(error)
+                        l.Logger.Error(
+                                "error logged",
+                                zap.String("service", serviceName),
+                                zap.String("actor", actor.Name()),
+                                zap.String("uuid", actor.UUID()),
+                                zap.String("error", e.Error()),
+                        )</span>
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package actor
+
+import (
+        "context"
+        "sync/atomic"
+        "time"
+
+        idb "github.com/vsdmars/actor/internal/db"
+        l "github.com/vsdmars/actor/internal/logger"
+
+        "github.com/google/uuid"
+        "go.uber.org/zap"
+)
+
+// NewActor creates new local actor
+//
+// ctx: caller's context, able to cancel created actor
+//
+// name: actor's name
+//
+// buffer: actor's channel buffer
+//
+// callbackFn: actor handler
+//
+// b: &lt; 0: disable backup, == 0: backup without rotation, &gt; 0: backup with rotation rows
+func NewActor(
+        ctx context.Context, // caller's context, able to cancel created actor.
+        name string, // actor's name
+        buffer int, // actor's channel buffer
+        callbackFn HandleType, // actor's handler
+        b int, // backup actor's receiving message
+) (Actor, error) <span class="cov5" title="1209">{
+
+        if buffer &lt; 0 </span><span class="cov1" title="1">{
+                return nil, ErrChannelBuffer
+        }</span>
+
+        <span class="cov5" title="1208">var db idb.DB
+        uuidVal := uuid.New().String()
+
+        if b &gt;= 0 </span><span class="cov0" title="0">{
+                // using sqlite for local backup
+                s, err := idb.NewSqlite(
+                        ctx,
+                        name,
+                        uuidVal,
+                        idb.DELETE, // sqlite journal mode
+                        idb.SHARED, // sqlite cache mode
+                        b,          // rotate records
+                        30,         // rotate period/seconds
+                )
+                if err != nil </span><span class="cov0" title="0">{
+                        l.Logger.Error(
+                                "backup db creation error",
+                                zap.String("service", serviceName),
+                                zap.String("actor", name),
+                                zap.String("error", err.Error()),
+                        )
+
+                        return nil, err
+                }</span>
+
+                <span class="cov0" title="0">db = s</span>
+        }
+
+        // create Actor's context
+        <span class="cov5" title="1208">ctx, cancel := context.WithCancel(ctx)
+        // create Actor's message channel
+        pipe := make(chan interface{}, buffer)
+
+        // escape localActor object store ptr to localActor instance into Actor interface
+        actor := Actor(
+                &amp;localActor{
+                        name:         name,
+                        uuid:         uuidVal,
+                        actorContext: actorContext{ctx, cancel},
+                        channels:     channels{pipe, pipe},
+                        backup:       backup{db},
+                },
+        )
+
+        if err := regActor.register(actor); err != nil </span><span class="cov1" title="1">{
+                actor.close() // clean up actor
+
+                l.Logger.Debug(
+                        "clean up duplicated actor",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.Name()),
+                        zap.String("uuid", actor.UUID()),
+                        zap.String("error", err.Error()),
+                )
+
+                return nil, err
+        }</span>
+
+        <span class="cov5" title="1207">go func() </span><span class="cov5" title="1207">{
+                defer func() </span><span class="cov5" title="1207">{
+                        regActor.deregister(actor)
+                        actor.endStamp()
+                        actor.close()
+
+                        if r := recover(); r != nil </span><span class="cov1" title="1">{
+                                l.Logger.Error(
+                                        "actor handler panic",
+                                        zap.String("service", serviceName),
+                                        zap.String("actor", actor.Name()),
+                                        zap.String("uuid", actor.UUID()),
+                                        zap.Any("panic", r),
+                                )
+                        }</span>
+                }()
+
+                <span class="cov5" title="1207">actor.startStamp()
+
+                go actor.increaseIdle()
+
+                // block call
+                // return closes the channel, actor dies
+                callbackFn(actor)</span>
+        }()
+
+        <span class="cov5" title="1207">return actor, nil</span>
+}
+
+// --- Actor interface functions ---
+
+// Backup backups message into local sqlite db
+func (actor *localActor) Backup(msg string) <span class="cov0" title="0">{
+        if actor.db != nil </span><span class="cov0" title="0">{
+                if err := actor.db.Insert(msg); err != nil </span><span class="cov0" title="0">{
+                        l.Logger.Error(
+                                "backup actor message error",
+                                zap.String("service", serviceName),
+                                zap.String("actor", actor.name),
+                                zap.String("uuid", actor.uuid),
+                                zap.String("error", err.Error()),
+                        )
+                }</span>
+        }
+}
+
+// Done Actor's context.done()
+//
+// context.done() is used for cleaning up Actor resource
+func (actor *localActor) Done() &lt;-chan struct{} <span class="cov10" title="2006020">{
+        return actor.ctx.Done()
+}</span>
+
+// Idle returns actor's idle time
+func (actor *localActor) Idle() time.Duration <span class="cov1" title="2">{
+        return time.Duration(atomic.LoadInt64(&amp;actor.idle))
+}</span>
+
+// Name returns actor's name
+func (actor *localActor) Name() string <span class="cov9" title="1017103">{
+        return actor.name
+}</span>
+
+// Receive receives message from actor
+func (actor *localActor) Receive() &lt;-chan interface{} <span class="cov9" title="1002406">{
+        return actor.receive
+}</span>
+
+// Send sends message to actor
+func (actor *localActor) Send(message interface{}) (err error) <span class="cov9" title="1002405">{
+        defer func() </span><span class="cov9" title="1002405">{
+                if r := recover(); r != nil </span><span class="cov0" title="0">{
+                        l.Logger.Error(
+                                "actor in closed state",
+                                zap.String("service", serviceName),
+                                zap.String("actor", actor.name),
+                                zap.String("uuid", actor.uuid),
+                                zap.Any("recover", r),
+                        )
+
+                        err = ErrChannelClosed
+                }</span>
+        }()
+
+        <span class="cov9" title="1002405">select </span>{
+        case &lt;-actor.Done():<span class="cov3" title="101">
+                l.Logger.Error(
+                        "actor is cancelled",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.name),
+                        zap.String("uuid", actor.uuid),
+                        zap.String("error", "actor is cancelled"),
+                )
+
+                err = ErrChannelClosed
+                return</span>
+        default:<span class="cov9" title="1002304">
+                // block, force golang scheduler to process message.
+                // do not use select on purpose.
+                actor.send &lt;- message
+                actor.resetIdle()
+
+                l.Logger.Debug(
+                        "send",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.Name()),
+                        zap.String("uuid", actor.UUID()),
+                        zap.Any("message", message),
+                )
+
+                return</span>
+        }
+}
+
+// UUID returns actor's UUID
+func (actor *localActor) UUID() string <span class="cov9" title="1008542">{
+        return actor.uuid
+}</span>
+
+func (actor *localActor) close() <span class="cov5" title="1308">{
+        actor.cancel()
+
+        // https://stackoverflow.com/a/8593986 Not a precise answer but ok.
+        // do not close actor's channel avoid race condition
+        // it's not a resource leak if channel remains open
+        // Why? hey, hey, everything inside the channel is copied value
+        // close(act.send)
+}</span>
+
+func (actor *localActor) resetIdle() <span class="cov9" title="1002304">{
+        atomic.StoreInt64(&amp;actor.idle, 0)
+}</span>
+
+func (actor *localActor) increaseIdle() <span class="cov5" title="1207">{
+        if actor.timer == nil </span><span class="cov5" title="1207">{
+                actor.timer = time.NewTimer(10 * time.Second)
+        }</span>
+
+        <span class="cov5" title="1207">for </span><span class="cov5" title="1209">{
+                select </span>{
+                case &lt;-actor.Done():<span class="cov5" title="1207">
+                        // clean up the timer
+                        if actor.timer != nil </span><span class="cov5" title="1207">{
+                                actor.timer.Stop()
+                        }</span>
+
+                        <span class="cov5" title="1207">return</span>
+                case passed := &lt;-actor.timer.C:<span class="cov1" title="2">
+                        atomic.AddInt64(
+                                &amp;actor.idle,
+                                int64(time.Duration(passed.Second())*time.Second),
+                        )
+
+                        l.Logger.Debug(
+                                "actor idle seconds",
+                                zap.String("service", serviceName),
+                                zap.String("actor", actor.name),
+                                zap.String("uuid", actor.uuid),
+                                zap.Float64("seconds", time.Duration(
+                                        atomic.LoadInt64(&amp;actor.idle)).Seconds()),
+                        )
+
+                        actor.timer.Reset(10 * time.Second)</span>
+                }
+        }
+}
+
+func (actor *localActor) startStamp() <span class="cov5" title="1207">{
+        actor.startTime = time.Now()
+
+        if actor.db != nil </span><span class="cov0" title="0">{
+                actor.db.Start(actor.startTime)
+        }</span>
+
+        <span class="cov5" title="1207">l.Logger.Info(
+                "actor start time",
+                zap.String("service", serviceName),
+                zap.String("actor", actor.name),
+                zap.String("uuid", actor.uuid),
+                zap.String("time", actor.startTime.Format(time.UnixDate)),
+        )</span>
+}
+
+func (actor *localActor) endStamp() <span class="cov5" title="1207">{
+        actor.endTime = time.Now()
+
+        if actor.db != nil </span><span class="cov0" title="0">{
+                actor.db.Stop(actor.endTime)
+                actor.db.Close()
+        }</span>
+
+        <span class="cov5" title="1207">l.Logger.Info(
+                "actor end time",
+                zap.String("service", serviceName),
+                zap.String("actor", actor.name),
+                zap.String("uuid", actor.uuid),
+                zap.String("time", actor.endTime.Format(time.UnixDate)),
+        )</span>
+
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package actor
+
+import (
+        l "github.com/vsdmars/actor/internal/logger"
+
+        "go.uber.org/zap"
+        "go.uber.org/zap/zapcore"
+)
+
+// SetLogger sets caller provided zap logger
+//
+// reset to service's default logger by passing in nil pointer
+func SetLogger(ol *zap.Logger) <span class="cov0" title="0">{
+        l.SetLogger(ol)
+}</span>
+
+// SetLogLevel sets the service log level
+//
+// noop if caller provides it's own zap logger
+func SetLogLevel(level zapcore.Level) <span class="cov0" title="0">{
+        l.SetLogLevel(level)
+}</span>
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package actor
+
+import (
+        "fmt"
+
+        l "github.com/vsdmars/actor/internal/logger"
+
+        "go.uber.org/zap"
+)
+
+const (
+        errDupRegister = "actor already registered by name: %s"
+)
+
+var (
+        regActor = registeredActor{
+                nameUUID:  make(map[string]string),
+                uuidActor: make(map[string]Actor),
+        }
+)
+
+// Cleanup cleans up the use of actor library
+func Cleanup() <span class="cov1" title="1">{
+        defer regActor.rwLock.RUnlock()
+        regActor.rwLock.RLock()
+
+        l.Logger.Info(
+                "Actor Service Cleanup",
+                zap.String("service", serviceName),
+        )
+
+        for _, actor := range regActor.uuidActor </span><span class="cov5" title="100">{
+                actor.close()
+
+                l.Logger.Info(
+                        "Actor closed due to Cleanup",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.Name()),
+                        zap.String("uuid", actor.UUID()),
+                )
+        }</span>
+
+        <span class="cov1" title="1">l.LogSync()</span>
+}
+
+// Get return registered Actor by name
+func Get(name string) (Actor, error) <span class="cov10" title="7455">{
+        return regActor.getByName(name)
+}</span>
+
+// GetByName return registered Actor by name
+func GetByName(actor string) (Actor, error) <span class="cov0" title="0">{
+        return Get(actor)
+}</span>
+
+// GetByUUID return registered Actor by UUID
+func GetByUUID(uuid string) (Actor, error) <span class="cov5" title="101">{
+        return regActor.getByUUID(uuid)
+}</span>
+
+func (r *registeredActor) register(actor Actor) error <span class="cov8" title="1208">{
+        defer r.rwLock.Unlock()
+        r.rwLock.Lock()
+
+        if _, ok := r.nameUUID[actor.Name()]; ok </span><span class="cov1" title="1">{
+                l.Logger.Error(
+                        "register Actor failed",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.Name()),
+                        zap.String("uuid", actor.UUID()),
+                        zap.String("error", fmt.Sprintf(errDupRegister, actor.Name())),
+                )
+
+                return ErrRegisterActor
+        }</span>
+
+        <span class="cov8" title="1207">r.nameUUID[actor.Name()] = actor.UUID()
+        r.uuidActor[actor.UUID()] = actor
+
+        l.Logger.Info(
+                "actor registered",
+                zap.String("service", serviceName),
+                zap.String("actor", actor.Name()),
+                zap.String("uuid", actor.UUID()),
+        )
+
+        return nil</span>
+}
+
+func (r *registeredActor) deregister(actor Actor) error <span class="cov8" title="1207">{
+        defer r.rwLock.Unlock()
+        r.rwLock.Lock()
+
+        if _, ok := r.nameUUID[actor.Name()]; !ok </span><span class="cov0" title="0">{
+                l.Logger.Error(
+                        "deregister Actor failed",
+                        zap.String("service", serviceName),
+                        zap.String("actor", actor.Name()),
+                        zap.String("uuid", actor.UUID()),
+                        zap.String("message", "actor haven't registered by name"),
+                )
+
+                return ErrRegisterActor
+        }</span>
+
+        <span class="cov8" title="1207">delete(r.uuidActor, actor.UUID())
+        delete(r.nameUUID, actor.Name())
+
+        l.Logger.Info(
+                "actor deregistered",
+                zap.String("service", serviceName),
+                zap.String("actor", actor.Name()),
+                zap.String("uuid", actor.UUID()),
+        )
+
+        return nil</span>
+}
+
+func (r *registeredActor) getByName(name string) (Actor, error) <span class="cov10" title="7455">{
+        defer r.rwLock.RUnlock()
+        r.rwLock.RLock()
+
+        if uuid, ok := r.nameUUID[name]; ok </span><span class="cov9" title="7453">{
+                if actor, ok := r.uuidActor[uuid]; ok </span><span class="cov9" title="7453">{
+                        l.Logger.Info(
+                                "get actor by name",
+                                zap.String("service", serviceName),
+                                zap.String("actor", name),
+                                zap.String("uuid", uuid),
+                                zap.String("message", "actor retrieved"),
+                        )
+
+                        return actor, nil
+                }</span>
+        }
+
+        <span class="cov1" title="2">l.Logger.Error(
+                "get actor by name failed",
+                zap.String("service", serviceName),
+                zap.String("actor", name),
+                zap.String("message", "actor not registered"),
+        )
+
+        return nil, ErrRetrieveActor</span>
+}
+
+func (r *registeredActor) getByUUID(uuid string) (Actor, error) <span class="cov5" title="101">{
+        defer r.rwLock.RUnlock()
+        r.rwLock.RLock()
+
+        if actor, ok := r.uuidActor[uuid]; ok </span><span class="cov5" title="100">{
+                l.Logger.Info(
+                        "get actor by uuid",
+                        zap.String("service", serviceName),
+                        zap.String("uuid", uuid),
+                        zap.String("message", "actor retrieved"),
+                )
+
+                return actor, nil
+        }</span>
+
+        <span class="cov1" title="1">l.Logger.Error(
+                "get actor by uuid failed",
+                zap.String("service", serviceName),
+                zap.String("uuid", uuid),
+                zap.String("message", "actor not registered"),
+        )
+
+        return nil, ErrRetrieveActor</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
